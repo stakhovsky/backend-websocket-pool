@@ -1,0 +1,13 @@
+FROM python:3.10-slim-bullseye
+
+WORKDIR /app
+ENV PYTHONPATH "${PYTHONPATH}:/app"
+
+ADD _etc/node-server/requirements.txt requirements.txt
+RUN pip install -r requirements.txt
+
+ADD definition definition
+ADD libs libs
+ADD apps/node_server apps/node_server
+
+ENTRYPOINT ["python", "/app/apps/node_server/main.py"]

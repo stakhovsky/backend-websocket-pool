@@ -1,0 +1,13 @@
+FROM python:3.10-slim-bullseye
+
+WORKDIR /app
+ENV PYTHONPATH "${PYTHONPATH}:/app"
+
+ADD _etc/worker-server/requirements.txt requirements.txt
+RUN pip install -r requirements.txt
+
+ADD definition definition
+ADD libs libs
+ADD apps/worker_server apps/worker_server
+
+ENTRYPOINT ["python", "/app/apps/worker_server/main.py"]

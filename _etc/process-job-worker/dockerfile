@@ -1,0 +1,13 @@
+FROM python:3.10-slim-bullseye
+
+WORKDIR /app
+ENV PYTHONPATH "${PYTHONPATH}:/app"
+
+ADD _etc/process-job-worker/requirements.txt requirements.txt
+RUN pip install -r requirements.txt
+
+ADD definition definition
+ADD libs libs
+ADD apps/process_job_worker apps/process_job_worker
+
+ENTRYPOINT ["python", "/app/apps/process_job_worker/main.py"]

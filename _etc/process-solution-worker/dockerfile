@@ -1,0 +1,13 @@
+FROM python:3.10-slim-bullseye
+
+WORKDIR /app
+ENV PYTHONPATH "${PYTHONPATH}:/app"
+
+ADD _etc/process-solution-worker/requirements.txt requirements.txt
+RUN pip install -r requirements.txt
+
+ADD definition definition
+ADD libs libs
+ADD apps/process_solution_worker apps/process_solution_worker
+
+ENTRYPOINT ["python", "/app/apps/process_solution_worker/main.py"]

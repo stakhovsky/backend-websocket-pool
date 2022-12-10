@@ -1,0 +1,256 @@
+version: "3.3"
+
+services:
+  zookeeper:
+    image: bitnami/zookeeper:3.8
+    expose:
+      - "2181"
+    ports:
+      - "21810:2181"
+    environment:
+      - ZOO_ENABLE_AUTH=yes
+      - ZOO_SERVER_USERS=kafka
+      - ZOO_SERVER_PASSWORDS=kafka_password
+    volumes:
+      - "zookeeper:/bitnami"
+    profiles:
+      - kafka
+      - environment
+      - node-server
+      - process-job-worker
+      - process-solution-worker
+      - worker-server
+      - all
+
+  kafka:
+    image: bitnami/kafka:3.3
+    expose:
+      - "9093"
+    ports:
+      - "9093:9093"
+    environment:
+      - ALLOW_PLAINTEXT_LISTENER=yes
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_CFG_LISTENERS=INTERNAL://:9092,CLIENT://:9093
+      # Change CLIENT://kafka:9093 to CLIENT://localhost:9093 for environment-only usage
+      - KAFKA_CFG_ADVERTISED_LISTENERS=INTERNAL://kafka:9092,CLIENT://kafka:9093
+      - KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=INTERNAL:SASL_PLAINTEXT,CLIENT:PLAINTEXT
+      - KAFKA_CFG_SASL_MECHANISM_INTER_BROKER_PROTOCOL=PLAIN
+      - KAFKA_CLIENT_USER=kafka
+      - KAFKA_CLIENT_PASSWORD=kafka_password
+      - KAFKA_ZOOKEEPER_PROTOCOL=SASL
+      - KAFKA_ZOOKEEPER_USER=kafka
+      - KAFKA_ZOOKEEPER_PASSWORD=kafka_password
+    volumes:
+      - "kafka:/bitnami"
+    depends_on:
+      - zookeeper
+    restart: always
+    profiles:
+      - kafka
+      - environment
+      - node-server
+      - process-job-worker
+      - process-solution-worker
+      - worker-server
+      - all
+
+  rabbitmq:
+    image: bitnami/rabbitmq:3.11
+    expose:
+      - "5672"
+    ports:
+      - "15672:5672"
+      - "25672:15672"
+    environment:
+      - RABBITMQ_USERNAME=rabbitmq
+      - RABBITMQ_PASSWORD=rabbitmq_password
+    volumes:
+      - "rabbitmq:/bitnami"
+    profiles:
+      - rabbitmq
+      - environment
+      - node-server
+      - process-job-worker
+      - process-solution-worker
+      - worker-server
+      - all
+
+  db:
+    image: postgres:15-alpine
+    expose:
+      - "5432"
+    ports:
+      - "15432:5432"
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - "db:/var/lib/postgresql"
+    profiles:
+      - db
+      - environment
+      - process-job-worker
+      - process-solution-worker
+      - worker-server
+      - all
+
+  redis:
+    image: redis:7-alpine
+    expose:
+      - "6379"
+    ports:
+      - "16379:6379"
+    profiles:
+      - redis
+      - environment
+      - process-job-worker
+      - process-solution-worker
+      - all
+
+  node-server:
+    image: node-server:latest
+    build:
+      context: .
+      dockerfile: _etc/node-server/dockerfile
+      cache_from:
+        - python:3.10-slim-bullseye
+        - node-server:latest
+    ports:
+      - "8001:8001"
+    environment:
+      - NODE_SERVER_LOG_NAME=node-server
+      - NODE_SERVER_LOG_LEVEL=DEBUG
+      - NODE_SERVER_ROOT_LOG_LEVEL=ERROR
+      - NODE_SERVER_KAFKA_SERVERS=kafka:9093
+      - NODE_SERVER_KAFKA_USER=kafka
+      - NODE_SERVER_KAFKA_PASSWORD=kafka_password
+      - NODE_SERVER_KAFKA_TOPIC=solution
+      - NODE_SERVER_RABBITMQ_ADDRESS=rabbitmq:5672
+      - NODE_SERVER_RABBITMQ_USER=rabbitmq
+      - NODE_SERVER_RABBITMQ_PASSWORD=rabbitmq_password
+      - NODE_SERVER_RABBITMQ_EXCHANGE=job
+      - NODE_SERVER_SOLUTION_WAIT_TIME_SECONDS=1200
+      - NODE_SERVER_SERVER_PORT=8001
+    depends_on:
+      - kafka
+      - rabbitmq
+    restart: always
+    profiles:
+      - node-server
+      - all
+
+  process-job-worker:
+    image: process-job-worker:latest
+    build:
+      context: .
+      dockerfile: _etc/process-job-worker/dockerfile
+      cache_from:
+        - python:3.10-slim-bullseye
+        - process-job-worker:latest
+    environment:
+      - PROCESS_JOB_WORKER_LOG_NAME=process-job
+      - PROCESS_JOB_WORKER_LOG_LEVEL=DEBUG
+      - PROCESS_JOB_WORKER_ROOT_LOG_LEVEL=ERROR
+      - PROCESS_JOB_WORKER_RABBITMQ_ADDRESS=rabbitmq:5672
+      - PROCESS_JOB_WORKER_RABBITMQ_USER=rabbitmq
+      - PROCESS_JOB_WORKER_RABBITMQ_PASSWORD=rabbitmq_password
+      - PROCESS_JOB_WORKER_RABBITMQ_QUEUE=job.persist_and_broadcast
+      - PROCESS_JOB_WORKER_POSTGRESQL_DSN=postgresql+asyncpg://postgres:postgres@db:5432/postgres
+      - PROCESS_JOB_WORKER_REDIS_DSN=redis://redis:6379/
+      - PROCESS_JOB_WORKER_RECORD_TTL_SECONDS=3600
+      - PROCESS_JOB_WORKER_KAFKA_SERVERS=kafka:9093
+      - PROCESS_JOB_WORKER_KAFKA_USER=kafka
+      - PROCESS_JOB_WORKER_KAFKA_PASSWORD=kafka_password
+      - PROCESS_JOB_WORKER_KAFKA_TOPIC=job
+    depends_on:
+      - kafka
+      - rabbitmq
+      - db
+      - redis
+    restart: always
+    profiles:
+      - process-job-worker
+      - all
+  
+  process-solution-worker:
+    image: process-solution-worker:latest
+    build:
+      context: .
+      dockerfile: _etc/process-solution-worker/dockerfile
+      cache_from:
+        - python:3.10-slim-bullseye
+        - process-solution-worker:latest
+    environment:
+      - PROCESS_SOLUTION_WORKER_LOG_NAME=process-solution
+      - PROCESS_SOLUTION_WORKER_LOG_LEVEL=DEBUG
+      - PROCESS_SOLUTION_WORKER_ROOT_LOG_LEVEL=ERROR
+      - PROCESS_SOLUTION_WORKER_RABBITMQ_ADDRESS=rabbitmq:5672
+      - PROCESS_SOLUTION_WORKER_RABBITMQ_USER=rabbitmq
+      - PROCESS_SOLUTION_WORKER_RABBITMQ_PASSWORD=rabbitmq_password
+      - PROCESS_SOLUTION_WORKER_RABBITMQ_QUEUE=solution.persist_and_broadcast
+      - PROCESS_SOLUTION_WORKER_SOLUTION_POSTGRESQL_DSN=postgresql+asyncpg://postgres:postgres@db:5432/postgres
+      - PROCESS_SOLUTION_WORKER_JOB_POSTGRESQL_DSN=postgresql+asyncpg://postgres:postgres@db:5432/postgres
+      - PROCESS_SOLUTION_WORKER_REDIS_DSN=redis://redis:6379/
+      - PROCESS_SOLUTION_WORKER_RECORD_TTL_SECONDS=3600
+      - PROCESS_SOLUTION_WORKER_KAFKA_SERVERS=kafka:9093
+      - PROCESS_SOLUTION_WORKER_KAFKA_USER=kafka
+      - PROCESS_SOLUTION_WORKER_KAFKA_PASSWORD=kafka_password
+      - PROCESS_SOLUTION_WORKER_KAFKA_TOPIC=solution
+    depends_on:
+      - kafka
+      - rabbitmq
+      - db
+      - redis
+    restart: always
+    profiles:
+      - process-solution-worker
+      - all
+
+  worker-server:
+    image: worker-server:latest
+    build:
+      context: .
+      dockerfile: _etc/worker-server/dockerfile
+      cache_from:
+        - python:3.10-slim-bullseye
+        - worker-server:latest
+    ports:
+      - "8002:8002"
+    environment:
+      - WORKER_SERVER_LOG_NAME=node-server
+      - WORKER_SERVER_LOG_LEVEL=DEBUG
+      - WORKER_SERVER_ROOT_LOG_LEVEL=ERROR
+      - WORKER_SERVER_KAFKA_SERVERS=kafka:9093
+      - WORKER_SERVER_KAFKA_USER=kafka
+      - WORKER_SERVER_KAFKA_PASSWORD=kafka_password
+      - WORKER_SERVER_KAFKA_TOPIC=job
+      - WORKER_SERVER_RABBITMQ_ADDRESS=rabbitmq:5672
+      - WORKER_SERVER_RABBITMQ_USER=rabbitmq
+      - WORKER_SERVER_RABBITMQ_PASSWORD=rabbitmq_password
+      - WORKER_SERVER_RABBITMQ_EXCHANGE=solution
+      - WORKER_SERVER_SOLUTION_WAIT_TIME_SECONDS=1200
+      - WORKER_SERVER_POSTGRESQL_DSN=postgresql+asyncpg://postgres:postgres@db:5432/postgres
+      - WORKER_SERVER_SERVER_PORT=8002
+    depends_on:
+      - kafka
+      - rabbitmq
+      - db
+    restart: always
+    profiles:
+      - worker-server
+      - all
+
+volumes:
+  zookeeper:
+    driver: local
+  kafka:
+    driver: local
+
+  rabbitmq:
+    driver: local
+
+  db:
+    driver: local
