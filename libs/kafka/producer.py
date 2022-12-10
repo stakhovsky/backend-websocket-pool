@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import typing
 
@@ -16,6 +17,7 @@ class Error(Exception):
 class Producer(definition.producer.Producer):
     _connect_retry_attempts: int = 5
     _retry_attempts: int = 3
+    _stop_wait_time_seconds: int = 5
 
     __slots__ = (
         "_servers",
@@ -62,8 +64,11 @@ class Producer(definition.producer.Producer):
         logger: typing.Optional[typing.Union[logging.Logger, logging.LoggerAdapter]] = None,
     ) -> None:
         try:
-            await self._producer.stop()
+            await asyncio.wait_for(self._producer.stop(), self._stop_wait_time_seconds)
         except Exception as exc:
+            if isinstance(exc, asyncio.TimeoutError):
+                return
+
             if logger is not None:
                 logger.exception(exc)
 

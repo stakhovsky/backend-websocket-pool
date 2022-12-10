@@ -7,15 +7,6 @@ import websockets
 
 import libs.logger
 
-import apps.node_server.main
-import apps.node_server.settings
-import apps.process_job_worker.main
-import apps.process_job_worker.settings
-import apps.process_solution_worker.main
-import apps.process_solution_worker.settings
-import apps.worker_server.main
-import apps.worker_server.settings
-
 
 @simple_dataclass_settings.settings
 class _Log:
@@ -27,15 +18,6 @@ class _Log:
 @simple_dataclass_settings.settings
 class Settings:
     log: _Log
-    node_server: apps.node_server.settings.Settings
-    process_job_worker: apps.process_job_worker.settings.Settings
-    process_solution_worker: apps.process_solution_worker.settings.Settings
-    worker_server: apps.worker_server.settings.Settings
-
-    startup_wait_time_seconds: int = simple_dataclass_settings.field.int(
-        var="STARTUP_WAIT_TIME_SECONDS",
-        default=10,
-    )
 
 
 def _get_worker_registration_data() -> dict:
@@ -106,29 +88,11 @@ async def main(
         level=cfg.log.level,
     )
 
-    loop = asyncio.get_event_loop()
-    tasks = [
-        loop.create_task(
-            apps.node_server.main.main(cfg.node_server),
-        ),
-        loop.create_task(
-            apps.process_job_worker.main.main(cfg.process_job_worker),
-        ),
-        loop.create_task(
-            apps.process_solution_worker.main.main(cfg.process_solution_worker),
-        ),
-        loop.create_task(
-            apps.worker_server.main.main(cfg.worker_server),
-        ),
-    ]
-
     try:
-        logger.info("Waiting for servers to start...")
-        await asyncio.sleep(cfg.startup_wait_time_seconds)
         logger.info("Starting tests")
 
-        async with websockets.connect(f"ws://localhost:{cfg.node_server.server.port}") as node:
-            async with websockets.connect(f"ws://localhost:{cfg.worker_server.server.port}") as worker:
+        async with websockets.connect(f"ws://localhost:8001") as node:
+            async with websockets.connect(f"ws://localhost:8002") as worker:
                 logger.info("Registering worker and waiting for registration")
                 await worker.send(orjson.dumps(_get_worker_registration_data()))
                 await asyncio.sleep(1.5)
@@ -160,9 +124,10 @@ async def main(
                 logger.info("Message received, checking content")
                 assert solution_output == solution_input["solution"]
                 logger.info("Message checked")
-    finally:
-        for task in tasks:
-            task.cancel()
+    except Exception:
+        logger.info("Tests failed")
+        raise
+    else:
         logger.info("Tests done")
 
 

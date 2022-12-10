@@ -1,6 +1,7 @@
 import asyncio
 import functools
 import logging
+import typing
 
 import definition.entity.job
 import definition.entity.solution
@@ -69,6 +70,9 @@ async def _consume_solutions(
             ),
             logger=logger,
         )
+    except Exception as exc:
+        if not isinstance(exc, definition.consumer.DisconnectError):
+            logger.exception(exc)
     finally:
         if connection.open:
             try:
@@ -82,15 +86,15 @@ async def _create_connection_consumer(
     solution_consumer_factory: definition.consumer.ConsumerFactory,
     expected_solution_storage: definition.storage.expected_solutions_storage.Storage,
     logger: logging.Logger,
-) -> definition.consumer.Consumer:
+) -> typing.Tuple[definition.consumer.Consumer, asyncio.Task]:
     solution_consumer = await solution_consumer_factory.spawn()
-    asyncio.get_event_loop().create_task(_consume_solutions(
+    consume_task = asyncio.get_event_loop().create_task(_consume_solutions(
         connection=connection,
         solution_consumer=solution_consumer,
         expected_solution_storage=expected_solution_storage,
         logger=logger,
     ))
-    return solution_consumer
+    return solution_consumer, consume_task
 
 
 async def handle_node_connection(
@@ -107,7 +111,7 @@ async def handle_node_connection(
     )
 
     try:
-        solution_consumer = await _create_connection_consumer(
+        solution_consumer, consume_task = await _create_connection_consumer(
             connection=connection,
             solution_consumer_factory=solution_consumer_factory,
             expected_solution_storage=expected_solution_storage,
@@ -146,8 +150,15 @@ async def handle_node_connection(
         logger.debug(f"{log_prefix} Critical error during connection")
         logger.exception(exc)
     finally:
-        await solution_consumer.close(
-            logger=logger,
-        )
+        if consume_task is not None:
+            if not consume_task.done():
+                consume_task.cancel()
+
         expected_solution_storage.close()
+
+        if solution_consumer is not None:
+            await solution_consumer.close(
+                logger=logger,
+            )
+
         logger.debug(f"{log_prefix} Connection closed")

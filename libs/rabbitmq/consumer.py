@@ -1,3 +1,4 @@
+import asyncio
 import functools
 import logging
 import typing
@@ -20,6 +21,7 @@ class Error(Exception):
 class Consumer(definition.consumer.Consumer):
     _connect_retry_attempts: int = 5
     _retry_attempts: int = 3
+    _stop_wait_time_seconds: int = 5
 
     __slots__ = (
         "_address",
@@ -57,8 +59,11 @@ class Consumer(definition.consumer.Consumer):
         logger: typing.Optional[typing.Union[logging.Logger, logging.LoggerAdapter]] = None,
     ) -> None:
         try:
-            await self._connection.close()
+            await self._connection.close(timeout=self._stop_wait_time_seconds)
         except Exception as exc:
+            if isinstance(exc, asyncio.TimeoutError):
+                return
+
             if logger is not None:
                 logger.exception(exc)
 

@@ -19,6 +19,7 @@ class Producer(definition.producer.Producer):
     _channels_count: int = 25
     _connect_retry_attempts: int = 5
     _retry_attempts: int = 3
+    _stop_wait_time_seconds: int = 5
 
     __slots__ = (
         "_address",
@@ -62,10 +63,11 @@ class Producer(definition.producer.Producer):
     ) -> None:
         for src in (*self._channels, self._connection):
             try:
-                await src.close()
+                await src.close(timeout=self._stop_wait_time_seconds)
             except Exception as e:
-                if logger is not None:
-                    logger.exception(e)
+                if not isinstance(e, asyncio.TimeoutError):
+                    if logger is not None:
+                        logger.exception(e)
 
     async def _get_channel(self) -> aiormq.Channel:
         if len(self._channels) < self._channels_count:

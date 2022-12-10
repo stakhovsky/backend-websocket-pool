@@ -5,6 +5,10 @@ import typing
 Data = typing.TypeVar("Data")
 
 
+class DisconnectError(Exception):
+    ...
+
+
 class Consumer(typing.Protocol):
     async def open(self) -> None:
         ...

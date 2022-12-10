@@ -27,12 +27,20 @@ class Server(definition.server.Server):
         handler: typing.Callable[[definition.server.Connection], typing.Awaitable[None]],
     ) -> None:
         self._stop_marker = libs.asyncio.stop_marker()
-        async with websockets.serve(
+
+        server = websockets.serve(
             handler,
             host="",
             port=self._port,
-        ):
-            await self._stop_marker
+        )
+        try:
+            async with server:
+                await self._stop_marker
+        finally:
+            if server.ws_server.websockets:
+                await asyncio.gather(*(
+                    websocket.handler_task for websocket in server.ws_server.websockets
+                ))
 
     def stop(
         self,

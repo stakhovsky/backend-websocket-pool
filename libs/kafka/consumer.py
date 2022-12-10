@@ -1,5 +1,4 @@
 import asyncio
-import contextlib
 import logging
 import time
 import typing
@@ -26,6 +25,7 @@ class Error(Exception):
 class Consumer(definition.consumer.Consumer):
     _connect_retry_attempts: int = 5
     _retry_attempts: int = 3
+    _stop_wait_time_seconds: int = 5
 
     __slots__ = (
         "_servers",
@@ -77,14 +77,17 @@ class Consumer(definition.consumer.Consumer):
         logger: typing.Optional[typing.Union[logging.Logger, logging.LoggerAdapter]] = None,
     ) -> None:
         try:
-            await self._consumer.stop()
+            await asyncio.wait_for(self._consumer.stop(), self._stop_wait_time_seconds)
         except Exception as exc:
+            if isinstance(exc, asyncio.TimeoutError):
+                return
+
             if logger is not None:
                 logger.exception(exc)
 
     @libs.retry.retry(
         attempts=_retry_attempts,
-        ignore_exceptions=(aiokafka.errors.ConsumerStoppedError, ),
+        ignore_exceptions=(definition.consumer.DisconnectError, ),
     )
     async def _commit(
         self,
@@ -98,20 +101,20 @@ class Consumer(definition.consumer.Consumer):
             await self._consumer.commit({
                 tp: message.offset + 1,
             })
-        except (asyncio.CancelledError, aiokafka.errors.ConsumerStoppedError):
-            raise
+        except aiokafka.errors.ConsumerStoppedError as exc:
+            raise definition.consumer.DisconnectError from exc
         except Exception as exc:
             raise Error from exc
 
     @libs.retry.retry(
         attempts=_retry_attempts,
-        ignore_exceptions=(aiokafka.errors.ConsumerStoppedError, ),
+        ignore_exceptions=(definition.consumer.DisconnectError, ),
     )
     async def _get_message(self) -> _Message:
         try:
             return await self._consumer.getone()
-        except (asyncio.CancelledError, aiokafka.errors.ConsumerStoppedError):
-            raise
+        except aiokafka.errors.ConsumerStoppedError as exc:
+            raise definition.consumer.DisconnectError from exc
         except Exception as exc:
             raise Error from exc
 
@@ -123,10 +126,7 @@ class Consumer(definition.consumer.Consumer):
         logger: typing.Optional[typing.Union[logging.Logger, logging.LoggerAdapter]] = None,
     ) -> None:
         while True:
-            try:
-                message = await self._get_message()
-            except (asyncio.CancelledError, aiokafka.errors.ConsumerStoppedError):
-                break
+            message = await self._get_message()
 
             try:
                 data = libs.parsing.parse(message_cls, message.value)

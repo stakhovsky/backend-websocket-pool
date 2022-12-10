@@ -50,6 +50,8 @@ Tests and management scripts (such as db migrations runner) are stored at `misc`
 - set up python, create virtual environment, set up required packages (`_etc/full_requirements.txt`)
 - run `docker-compose --profile environment up` to run environment in compose
 - run `misc/setup_local_environment.py`
+- run `docker-compose --profile all up` to run project in compose
+- wait until project started
 - run `misc/local_e2e_test.py`
 
 ## TODO

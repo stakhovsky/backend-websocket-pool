@@ -71,6 +71,9 @@ async def _consume_jobs(
             ),
             logger=logger,
         )
+    except Exception as exc:
+        if not isinstance(exc, definition.consumer.DisconnectError):
+            logger.exception(exc)
     finally:
         if connection.open:
             try:
@@ -84,15 +87,15 @@ async def _create_connection_consumer(
     job_consumer_factory: definition.consumer.ConsumerFactory,
     priority_shield: definition.job_priority_shield.Shield,
     logger: logging.Logger,
-) -> definition.consumer.Consumer:
+) -> typing.Tuple[definition.consumer.Consumer, asyncio.Task]:
     job_consumer = await job_consumer_factory.spawn()
-    asyncio.get_event_loop().create_task(_consume_jobs(
+    consume_task = asyncio.get_event_loop().create_task(_consume_jobs(
         connection=connection,
         job_consumer=job_consumer,
         priority_shield=priority_shield,
         logger=logger,
     ))
-    return job_consumer
+    return job_consumer, consume_task
 
 
 async def _try_register_worker(
@@ -106,6 +109,7 @@ async def _try_register_worker(
     typing.Optional[definition.entity.worker.Worker],
     typing.Optional[definition.entity.worker.WorkerConnection],
     typing.Optional[definition.consumer.Consumer],
+    typing.Optional[asyncio.Task],
 ]:
     log_prefix = f"[Connection {id(connection)}]"
 
@@ -115,7 +119,7 @@ async def _try_register_worker(
         logger.exception(exc)
         logger.debug(f"{log_prefix} Got unknown worker handshake")
         await connection.close(3000)
-        return False, None, None, None
+        return False, None, None, None, None
 
     try:
         worker_connection = await worker_storage.store_connect(worker)
@@ -123,11 +127,11 @@ async def _try_register_worker(
         logger.exception(exc)
         logger.debug(f"{log_prefix} Got error while saving worker connection")
         await connection.close(1011)
-        return False, worker, None, None
+        return False, worker, None, None, None
 
     priority_shield = libs.in_memory.job_priority_shield.Shield()
     try:
-        job_consumer = await _create_connection_consumer(
+        job_consumer, consume_task = await _create_connection_consumer(
             connection=connection,
             job_consumer_factory=job_consumer_factory,
             priority_shield=priority_shield,
@@ -137,10 +141,10 @@ async def _try_register_worker(
         logger.exception(exc)
         logger.debug(f"{log_prefix} Could not start consumer")
         await connection.close(1011)
-        return False, worker, worker_connection, None
+        return False, worker, worker_connection, None, None
 
     logger.debug(f"{log_prefix} Worker registered")
-    return True, worker, worker_connection, job_consumer
+    return True, worker, worker_connection, job_consumer, consume_task
 
 
 async def handle_worker_connection(
@@ -153,6 +157,7 @@ async def handle_worker_connection(
     worker: typing.Optional[definition.entity.worker.Worker] = None
     worker_connection: typing.Optional[definition.entity.worker.WorkerConnection] = None
     job_consumer: typing.Optional[definition.consumer.Consumer] = None
+    consume_task: typing.Optional[asyncio.Task] = None
 
     log_prefix = f"[Connection {id(connection)}]"
     logger.debug(f"{log_prefix} Connection started")
@@ -160,7 +165,7 @@ async def handle_worker_connection(
     try:
         async for data in connection:
             if worker is None:
-                is_success, worker, worker_connection, job_consumer = await _try_register_worker(
+                is_success, worker, worker_connection, job_consumer, consume_task = await _try_register_worker(
                     data=data,
                     connection=connection,
                     logger=logger,
@@ -205,6 +210,10 @@ async def handle_worker_connection(
             except Exception as exc:
                 logger.exception(exc)
                 logger.debug(f"{log_prefix} Got error while saving worker disconnection")
+
+        if consume_task is not None:
+            if not consume_task.done():
+                consume_task.cancel()
 
         if job_consumer is not None:
             await job_consumer.close(
