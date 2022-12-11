@@ -22,6 +22,17 @@ class Server(definition.server.Server):
 
         self._stop_marker: typing.Optional[asyncio.Future] = None
 
+    @staticmethod
+    async def _complete_all_tasks(
+        server,
+    ) -> None:
+        if server.ws_server.websockets:
+            connection_tasks = (
+                websocket.handler_task
+                for websocket in server.ws_server.websockets
+            )
+            await asyncio.shield(asyncio.gather(*connection_tasks))
+
     async def start(
         self,
         handler: typing.Callable[[definition.server.Connection], typing.Awaitable[None]],
@@ -37,10 +48,8 @@ class Server(definition.server.Server):
             async with server:
                 await self._stop_marker
         finally:
-            if server.ws_server.websockets:
-                await asyncio.gather(*(
-                    websocket.handler_task for websocket in server.ws_server.websockets
-                ))
+            # just to be completely sure that all connections are stopped here
+            await asyncio.shield(self._complete_all_tasks(server))
 
     def stop(
         self,

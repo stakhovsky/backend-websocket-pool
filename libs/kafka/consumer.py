@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 import time
 import typing
 import uuid
@@ -25,7 +26,9 @@ class Error(Exception):
 class Consumer(definition.consumer.Consumer):
     _connect_retry_attempts: int = 5
     _retry_attempts: int = 3
-    _stop_wait_time_seconds: int = 5
+    _stop_wait_time_seconds: int = 15
+
+    _consumer_stop_lock: asyncio.Lock = asyncio.Lock()
 
     __slots__ = (
         "_servers",
@@ -76,14 +79,23 @@ class Consumer(definition.consumer.Consumer):
         self,
         logger: typing.Optional[typing.Union[logging.Logger, logging.LoggerAdapter]] = None,
     ) -> None:
-        try:
-            await asyncio.wait_for(self._consumer.stop(), self._stop_wait_time_seconds)
-        except Exception as exc:
-            if isinstance(exc, asyncio.TimeoutError):
-                return
+        # FIXME: https://github.com/aio-libs/aiokafka/issues/773
 
-            if logger is not None:
-                logger.exception(exc)
+        async def _stop():
+            async with self._consumer_stop_lock:
+                # postpone stop() for some time
+                await asyncio.sleep(random.randint(50, 100) / 1000)
+
+                try:
+                    await asyncio.wait_for(self._consumer.stop(), self._stop_wait_time_seconds)
+                except Exception as exc:
+                    if isinstance(exc, asyncio.TimeoutError):
+                        return
+
+                    if logger is not None:
+                        logger.exception(exc)
+
+        asyncio.get_event_loop().create_task(_stop())
 
     @libs.retry.retry(
         attempts=_retry_attempts,

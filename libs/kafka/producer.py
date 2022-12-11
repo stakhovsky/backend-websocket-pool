@@ -17,7 +17,7 @@ class Error(Exception):
 class Producer(definition.producer.Producer):
     _connect_retry_attempts: int = 5
     _retry_attempts: int = 3
-    _stop_wait_time_seconds: int = 5
+    _stop_wait_time_seconds: int = 15
 
     __slots__ = (
         "_servers",
